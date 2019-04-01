@@ -30,15 +30,7 @@ def azure_token_url_for(tentant):
     return 'https://login.windows.net/{0}/oauth2/v2.0/token'.format(tentant)
 
 def azure_authorize_url_for(tentant):
-    return 'https://login.windows.net/{0}/oauth2/v2.0/authorize'.format(tentant)``` 
-
-# def azure_token_url_for(tentant):
-#     return 'https://login.microsoftonline.com/{0}/oauth2/token'.format(tentant)
-
-
-# def azure_authorize_url_for(tentant):
-#     return 'https://login.microsoftonline.com/{0}/oauth2/authorize'.format(
-#         tentant)
+    return 'https://login.windows.net/{0}/oauth2/v2.0/authorize'.format(tentant)
 
 
 class AzureAdMixin(OAuth2Mixin):
