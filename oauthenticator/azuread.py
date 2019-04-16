@@ -10,6 +10,7 @@ import re
 import string
 import urllib
 import sys
+import adal
 
 from tornado.auth import OAuth2Mixin
 from tornado.log import app_log
@@ -25,18 +26,10 @@ from traitlets import List, Set, Unicode
 from .common import next_page_from_links
 from .oauth2 import OAuthLoginHandler, OAuthenticator
 
-
-def azure_token_url_for(tentant):
-    return 'https://login.windows.net/{0}/oauth2/v2.0/token'.format(tentant)
-
-def azure_authorize_url_for(tentant):
-    return 'https://login.windows.net/{0}/oauth2/v2.0/authorize'.format(tentant)
-
-
 class AzureAdMixin(OAuth2Mixin):
-    tenant_id = os.environ.get('AAD_TENANT_ID', '')
-    _OAUTH_ACCESS_TOKEN_URL = azure_token_url_for(tenant_id)
-    _OAUTH_AUTHORIZE_URL = azure_authorize_url_for(tenant_id)
+    # tenant_id = os.environ.get('AAD_TENANT_ID', '')
+    _OAUTH_ACCESS_TOKEN_URL = os.environ.get('_OAUTH_ACCESS_TOKEN_URL')
+    _OAUTH_AUTHORIZE_URL = os.environ.get('_OAUTH_AUTHORIZE_URL')
 
 
 class AzureAdLoginHandler(OAuthLoginHandler, AzureAdMixin):
@@ -44,69 +37,39 @@ class AzureAdLoginHandler(OAuthLoginHandler, AzureAdMixin):
 
 
 class AzureAdOAuthenticator(OAuthenticator):
+    
     login_service = "Azure AD"
-
     login_handler = AzureAdLoginHandler
-
     tenant_id = Unicode(config=True)
-
-    def get_tenant(self):
-        if hasattr(self, 'tenant_id') and self.tenant_id:
-            app_log.info('ID3: {0}'.format(self.tenant_id))
-            return self.tenant_id
-        else:
-            tenant_id = Unicode(
-                os.environ.get('AAD_TENANT_ID', ''),
-                config=True,
-                help="Tenant")
-            app_log.info('ID4: {0}'.format(tenant_id))
-            return tenant_id
 
     @gen.coroutine
     def authenticate(self, handler, data=None):
+
+        _OAUTH_AUTHORITY_URL = os.environ.get('_OAUTH_AUTHORITY_URL')
+        _OAUTH_GRAPH_RESOURCE = os.environ.get('_OAUTH_GRAPH_RESOURCE')
+
         code = handler.get_argument("code")
-        http_client = AsyncHTTPClient()
-
-        params = dict(
-            client_id=self.client_id,
-            client_secret=self.client_secret,
-            grant_type='authorization_code',
-            code=code,
-            resource=self.client_id,
-            redirect_uri=self.get_callback_url(handler))
-
-        data = urllib.parse.urlencode(
-            params, doseq=True, encoding='utf-8', safe='=')
-
-        url = azure_token_url_for(self.get_tenant())
-
-        headers = {
-            'Content-Type':
-            'application/x-www-form-urlencoded; ; charset=UTF-8"'
-        }
-        req = HTTPRequest(
-            url,
-            method="POST",
-            headers=headers,
-            body=data  # Body is required for a POST...
+        auth_context = adal.AuthenticationContext(_OAUTH_AUTHORITY_URL)        
+        resp_json = auth_context.acquire_token_with_authorization_code(
+            code, 
+            self.get_callback_url(handler), 
+            _OAUTH_GRAPH_RESOURCE,
+            self.client_id, 
+            self.client_secret
         )
+        access_token = resp_json['accessToken']        
+        decoded = jwt.decode(access_token, verify=False)
 
-        resp = yield http_client.fetch(req)
-        resp_json = json.loads(resp.body.decode('utf8', 'replace'))
-
-        # app_log.info("Response %s", resp_json)
-        access_token = resp_json['access_token']
-
-        id_token = resp_json['id_token']
-        decoded = jwt.decode(id_token, verify=False)
-
-        userdict = {"name": decoded['name']}
-        userdict["auth_state"] = auth_state = {}
-        auth_state['access_token'] = access_token
-        # results in a decoded JWT for the user data
-        auth_state['user'] = decoded
-
-        return userdict
+        # return userdict
+        return {
+            'name': decoded['name'].replace(' ', ''),
+            'auth_state': {
+                'access_token': resp_json['accessToken'],
+                'refresh_token': resp_json['refreshToken'],
+                'oauth_user': resp_json,
+                'scope': self.scope
+            }
+        }
 
 
 class LocalAzureAdOAuthenticator(LocalAuthenticator, AzureAdOAuthenticator):
